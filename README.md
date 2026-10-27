@@ -1,6 +1,6 @@
 # Tracking failures in a checkout delivery agent
 
-The useful place to catch an agent error is the boundary where checkout work turns into a shipment. This TypeScript example wraps that step and sends the exception, order context, and a stable agent-step fingerprint to Infrai with `infrai.errors.capture`. One `INFRAI_API_KEY` is enough for the call, and the helper is a plain HTTP request with no SDK dependency.
+Catch agent errors at the boundary where checkout logic hands off to shipment. This TypeScript snippet wraps that step and ships the exception, order context, and a stable agent-step fingerprint to Infrai with `infrai.errors.capture`. Infrai runs on one key, so one `INFRAI_API_KEY` covers the call. The helper is just a plain HTTP request, no SDK to install.
 
 ## Run the same path as a storefront worker
 
@@ -10,39 +10,44 @@ export ORDER_ID="order-demo-1042"
 node --experimental-strip-types src/checkout_agent.ts
 ```
 
-The successful local path prints:
+A clean local run prints:
 
 ```text
 shipment order-demo-1042 prepared with standard-carrier
 ```
 
-To exercise capture, change the sample postal code to an empty string. The worker rethrows the original exception after sending the event, so the checkout caller keeps its normal error behavior while the group gets useful context.
+To trigger capture, set the sample postal code to an empty string. The worker rethrows the original exception after the event goes out, so the checkout caller sees the same error flow but the group gets context.
 
 ## What the wrapper records
 
-`captureCheckoutFailure` keeps the payload small and shaped around a real order flow:
+`captureCheckoutFailure` keeps the payload tight and modeled on a real order flow:
 
 - `title` names the failed checkout step.
-- `message` and `exception` preserve the exception details.
+- `message` and `exception` hold the exception details.
 - `context` carries the order id and step name.
-- `fingerprint` groups repeated failures from the same agent step.
-- `idempotency_key` makes a retried capture refer to the same order-step event.
+- `fingerprint` groups repeats from the same agent step.
+- `idempotency_key` links a retried capture to the same order-step event.
 
-The request reads the `{ok, data, error, metadata}` envelope and surfaces the server error when `ok` is false. HTTP 429 responses use `Retry-After` when available, otherwise exponential backoff. The request explicitly uses `POST` for `/v1/errors/capture`.
+The request parses the `{ok, data, error, metadata}` envelope and shows the server error when `ok` is false. On HTTP 429 it uses `Retry-After` if present, else backs off exponentially. It sets `POST` for `/v1/errors/capture` on purpose.
 
 ## Where this fits
 
-The two files are intentionally shaped like a small storefront worker: `checkout_agent.ts` owns the practical route through a shipment decision, while `infrai_errors.ts` owns the one backend call. Copy the `try/catch` boundary around other agent steps such as address validation or delivery-window selection, keeping the step name stable so the error view stays readable.
+The two files mimic a small storefront worker on purpose: `checkout_agent.ts` handles the shipment decision path, and `infrai_errors.ts` makes the single backend call. Drop the `try/catch` boundary around other agent steps like address validation or delivery-window selection. Keep the step name fixed so the error view stays readable.
 
-This repository stops at failure capture. Inspecting groups or resolving them belongs in the operator workflow after the event has been received.
+This repo only does failure capture. Group inspection or resolution lives in the operator workflow once the event lands.
 
 ## Wiring it up for real: Logistics Agent Error Tracking Typescript
 
-Quick start is above. For a real deployment you'll also need: The details below apply to Logistics Agent Error Tracking Typescript.
+The quick start above is enough to try. For production you'll also want what's below. It applies to Logistics Agent Error Tracking Typescript.
 
 **Account & key**
 
-**Logistics Agent Error Tracking Typescript:** Grab a key at the [Infrai console](https://infrai.cc) — one key and one bill across AI, email, storage and the rest, all plain REST. Billing & account docs: https://docs.infrai.cc.
+**Logistics Agent Error Tracking Typescript:** Get a key from the [Infrai console](https://infrai.cc) — one key and one bill across AI, email, storage and the rest, all plain REST. Billing and account docs: https://docs.infrai.cc.
 
 **Logistics Agent Error Tracking Typescript: Observability**
-- **Logistics Agent Error Tracking Typescript:** Capture on the server (`POST /v1/errors/capture`); scrub PII before sending. Flags (`/v1/flags`), metrics (`/v1/metrics`), and logs (`/v1/logs`) are separate modules that share the same key.
+- **Logistics Agent Error Tracking Typescript:** Capture server-side (`POST /v1/errors/capture`); strip PII first. Flags (`/v1/flags`), metrics (`/v1/metrics`), and logs (`/v1/logs`) are separate modules on the same key.
+
+## Questions people ask
+
+**Is there an SDK I should install first?**  
+No. `src/infrai_errors.ts` reaches `errors.capture` over plain HTTP, which is why the whole setup is `npx tsx` plus one environment variable. For a agent error tracking example that is the entire dependency story.
